@@ -168,6 +168,26 @@ function prepareCordisPatch() {
   const profileDir = path.join(DSH_HOME, 'profiles', PROFILE);
   const patchFile = path.join(profileDir, 'cordis.patch.yml');
   const original = fs.existsSync(patchFile) ? fs.readFileSync(patchFile, 'utf8') : '';
+
+  // Existing DSH profiles may contain SafeLoader-only tags such as `!!js`
+  // (for example the Murasame MCP Authorization header). js-yaml's default
+  // schema rejects them, so use a text-only managed-block replacement for
+  // those profiles. Profiles without custom tags keep the original parse /
+  // ID-based dedupe path (and its malformed-file protection).
+  if (original.includes('!!js')) {
+    const begin = original.indexOf('# === qq-bridge MCP BEGIN ===');
+    const end = original.indexOf('# === qq-bridge MCP END ===', Math.max(0, begin));
+    let base = original;
+    let removed = 0;
+    if (begin >= 0 && end >= begin) {
+      base = original.slice(0, begin) + original.slice(end + '# === qq-bridge MCP END ==='.length);
+      removed = 1;
+    }
+    base = base.replace(/\s+$/g, '');
+    const text = (base ? `${base}\n` : '') + mcpEntries();
+    return { patchFile, original, text, removed };
+  }
+
   const lines = original.replace(/^\uFEFF/, '').split(/\r?\n/);
   // Repair only the historical invalid *root* [] followed by block operations.
   // A nested [] or a line inside a literal scalar is user data and must survive.

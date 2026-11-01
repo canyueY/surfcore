@@ -109,6 +109,8 @@ const LOCAL_EXECUTION_TOOLS = [
   // 插件/cordis 运行期检查：能读宿主状态（0.1.7 起只有这两个名字）
   'cordis_inspect_list', 'cordis_inspect_query',
   // 本机文件 + 进程：plugin-guard 会改写配置并 spawn pnpm
+  // 这些名字在 DSH 0.2.1-rc.3 已不再注册，但保留在 deny-list 里：
+  // 如果宿主以后重新引入，守卫仍然默认拒绝。
   'dsh_snapshot', 'dsh_rollback', 'incident_resolved',
   // 会话/交付/任务面
   // 注意：`todo_write` 与 `ask_user_question` **故意不在**此名单——它们是下面

@@ -38,6 +38,13 @@ const DSH_MODULES = dshModulesDir();
 const DSH_HOME = path.join(os.homedir(), '.dsh');
 const BASE = process.env.DSH_BASE_URL || 'http://127.0.0.1:3080';
 
+// setup-dsh.mjs installs into the live profile (desktop for the desktop app),
+// not necessarily the historical `web` fallback. Resolve the same profile here
+// so the verifier checks the deployment that is actually in use.
+const { detectProfile } = await import(pathToFileURL(path.join(ROOT, 'scripts/detect-profile.mjs')).href);
+const PROFILE = String(process.env.DSH_PROFILE || await detectProfile()).trim() || 'web';
+const profileDir = path.join(DSH_HOME, 'profiles', PROFILE);
+
 let pass = 0, fail = 0;
 const results = [];
 function check(label, cond, extra = '') {
@@ -66,7 +73,9 @@ for (const p of ['qq-chat', 'qq-chat-v2']) {
   let schemaOk = false;
   try { persona.Config(row.config); schemaOk = true; } catch {}
   check(`preset ${p}: persona.config 通过 DSH schema`, schemaOk);
-  check(`preset ${p}: 保留 {{model}} / {{cwd}} 变量`, /\{\{model\}\}/.test(row.config.prefix) && /\{\{cwd\}\}/.test(row.config.suffix ?? ''));
+  // DSH 0.2.1-rc.2+ only registers {{model}}; the preset source intentionally
+  // dropped {{cwd}} because an unregistered variable aborts the whole turn.
+  check(`preset ${p}: 保留 {{model}} 变量`, /\{\{model\}\}/.test(row.config.prefix));
 }
 
 // ── 2. 部署侧：DSH 0.1.7 的 preset 机制 ──────────────────────────────────────
@@ -136,11 +145,14 @@ const scanned = collectDshToolNames();
 if (scanned.names.size === 0) {
   skip('守卫名单与 DSH 真实工具名对账', '未扫到任何 DSH 包（DSH 未安装？）');
 } else {
-  const fabricated = [...guardNames].filter((n) => !n.startsWith('dev_') && !scanned.names.has(n));
+  // Retired names are intentionally kept in the deny-list so they stay blocked
+  // if a future DSH reintroduces them; they are not typos.
+  const retired = new Set(['dsh_snapshot', 'dsh_rollback', 'incident_resolved']);
+  const fabricated = [...guardNames].filter((n) => !n.startsWith('dev_') && !retired.has(n) && !scanned.names.has(n));
   check('守卫名单无拼错的假名（restrict 不会静默失效）', fabricated.length === 0, fabricated.join(', ') || `扫过 ${scanned.packages.length} 个包`);
 }
 
-const patch = fs.readFileSync(path.join(DSH_HOME, 'profiles/web/cordis.patch.yml'), 'utf8');
+const patch = fs.readFileSync(path.join(profileDir, 'cordis.patch.yml'), 'utf8');
 const patchDoc = yaml.load(patch);
 const mcpIds = patchDoc.filter((e) => e?.insert).flatMap((e) => e.insert.map((x) => x.id));
 check('profile patch 含 3 个 MCP 且无重复', mcpIds.length === 3 && new Set(mcpIds).size === 3, mcpIds.join(', '));
@@ -151,10 +163,10 @@ check('mcp 路径指向本仓库', mcpIds.every((id) => {
   return String(e.config.args[0]).includes('surfcore');
 }));
 
-const pkg = JSON.parse(fs.readFileSync(path.join(DSH_HOME, 'profiles/web/package.json'), 'utf8'));
+const pkg = JSON.parse(fs.readFileSync(path.join(profileDir, 'package.json'), 'utf8'));
 check('profile bundles 含 surfcore', pkg.dsh.profile.bundles.includes('surfcore'));
 check('surfcore link 依赖已注册', String(pkg.dependencies['surfcore'] ?? '').startsWith('link:'));
-check('surfcore 已 link 进 node_modules', fs.existsSync(path.join(DSH_HOME, 'profiles/web/node_modules/surfcore')));
+check('surfcore 已 link 进 node_modules', fs.existsSync(path.join(profileDir, 'node_modules/surfcore')));
 
 // ── 3. 仓库配置：模型 ───────────────────────────────────────────────────────
 const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
